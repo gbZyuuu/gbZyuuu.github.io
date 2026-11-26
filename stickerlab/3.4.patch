@@ -1,0 +1,170 @@
+--- a/INSTALAR.sh
++++ b/INSTALAR.sh
+@@ -5 +5 @@
+-printf '\nStickerLab Bot 3.3 — instalação local\n'
++printf '\nStickerLab Bot 3.4 — instalação local\n'
+--- a/LEIA-ME.md
++++ b/LEIA-ME.md
+@@ -1 +1,3 @@
+-# StickerLab Bot 3.3 — figurinha sonora experimental (Termux)
++# StickerLab Bot 3.4 — correção de conversão (Termux)
++
++**3.4:** corrige o bloqueio indevido do demuxer `image2` em fotos JPEG, acrescenta fallback de codificação WebP e registra a etapa/erro de conversão no terminal sem expor dados da sessão. Mantém o Baileys, sessão, whitelist e protocolo experimental de áudio da 3.3.
+@@ -18 +20 @@
+-1. Baixe `StickerLab-Bot-3.3-Som-Referencia-Termux.zip` para Download no celular.
++1. Baixe `StickerLab-Bot-3.4-Correcao-Fig-Termux.zip` para Download no celular.
+@@ -24 +26 @@
+-unzip -o ~/storage/downloads/StickerLab-Bot-3.3-Som-Referencia-Termux.zip -d "$HOME"
++unzip -o ~/storage/downloads/StickerLab-Bot-3.4-Correcao-Fig-Termux.zip -d "$HOME"
+@@ -32 +34 @@
+-Pare o bot com Ctrl+C. Extraia o novo ZIP com `unzip -o ~/storage/downloads/StickerLab-Bot-3.3-Som-Referencia-Termux.zip -d "$HOME"` e volte para `cd ~/StickerLab-Bot-3.0`. Rode `bash TESTAR-SOM.sh` (sem conectar) e, se passar, `bash INICIAR.sh`. Não é necessário reinstalar dependências: o Baileys fixado continua igual. A pasta de sessão e whitelist `~/.stickerlab-bot` não é alterada pela extração. Informe o mesmo número ao iniciar. A biblioteca pode solicitar novo pareamento se a sessão anterior tiver sido invalidada; não force reconexões após restrição.
++Pare o bot com Ctrl+C. Extraia o novo ZIP com `unzip -o ~/storage/downloads/StickerLab-Bot-3.4-Correcao-Fig-Termux.zip -d "$HOME"` e volte para `cd ~/StickerLab-Bot-3.0`. Rode `bash TESTAR-SOM.sh` (sem conectar) e, se passar, `bash INICIAR.sh`. Não é necessário reinstalar dependências: o Baileys fixado continua igual. A pasta de sessão e whitelist `~/.stickerlab-bot` não é alterada pela extração. Informe o mesmo número ao iniciar. A biblioteca pode solicitar novo pareamento se a sessão anterior tiver sido invalidada; não force reconexões após restrição.
+--- a/package.json
++++ b/package.json
+@@ -3 +3 @@
+-  "version": "3.3.0",
++  "version": "3.4.0",
+--- a/src/bot.mjs
++++ b/src/bot.mjs
+@@ -87 +87,5 @@
+-        this.log(`Falha em ${j.cmd.name}.`);
++        // Only conversion errors are eligible for detailed *local* logging.
++        // Never dump Baileys errors, keys, URLs, message objects or stack traces.
++        const stage=j.stage||'comando';
++        const detail=stage==='conversão' ? String(e?.message||'erro desconhecido').replace(/https?:\/\/\S+/gi,'[URL removida]').replace(/[\x00-\x1f\x7f]/g,' ').slice(-1000) : String(e?.code||e?.name||'erro').replace(/[^a-zA-Z0-9_.-]/g,'').slice(0,60);
++        this.log(`Falha em ${j.cmd.name} [${stage}]: ${detail}`);
+@@ -104,0 +109 @@
++    j.stage='download';
+@@ -110 +115,3 @@
+-    if(c.name==='toaudio')return this.send(j,{audio:await this.audio(input,entry.kind,c),mimetype:'audio/ogg; codecs=opus',ptt:false});
++    j.stage='conversão';
++    this.log(`Mídia: ${entry.kind} | ${Math.round(input.length/1024)} KiB.`);
++    if(c.name==='toaudio'){const audio=await this.audio(input,entry.kind,c);j.stage='envio';return this.send(j,{audio,mimetype:'audio/ogg; codecs=opus',ptt:false});}
+@@ -118,0 +126 @@
++      j.stage='envio';
+@@ -123 +131 @@
+-    this.log(`Conversão: ${((Date.now()-convertingAt)/1000).toFixed(2)} s${output.encodeAttempts?` | ${output.encodeAttempts} tentativa(s)`:' / direta'}${output.fps?` | ${output.fps} FPS`:''} | ${Math.round((output.bytes||output.buffer.length)/1024)} KiB.`);
++    this.log(`Conversão: ${((Date.now()-convertingAt)/1000).toFixed(2)} s${output.encodeAttempts?` | ${output.encodeAttempts} tentativa(s)`:' / direta'}${output.fps?` | ${output.fps} FPS`:''} | ${Math.round((output.bytes||output.buffer.length)/1024)} KiB${output.encoder?' | '+output.encoder:''}.`);
+@@ -124,0 +133 @@
++    j.stage='envio';
+--- a/src/main.mjs
++++ b/src/main.mjs
+@@ -47 +47 @@
+-  console.log('\nSTICKERLAB BOT 3.3 | Terminal • WhatsApp\n');
++  console.log('\nSTICKERLAB BOT 3.4 | Terminal • WhatsApp\n');
+--- a/src/media.mjs
++++ b/src/media.mjs
+@@ -11 +11 @@
+-const INPUT_GUARD=['-protocol_whitelist','file,pipe','-format_whitelist','mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,gif,webp_pipe,png_pipe,jpeg_pipe,bmp_pipe,tiff_pipe,avif,avi,ogg,mp3,wav,aac,flac,amr,heif','-threads','2','-max_pixels','16777216'];
++const INPUT_GUARD=['-protocol_whitelist','file,pipe','-format_whitelist','mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,gif,webp,webp_pipe,image2,image2pipe,png_pipe,jpeg_pipe,mjpeg,bmp_pipe,tiff_pipe,apng,avif,avi,ogg,mp3,wav,aac,flac,amr,heif','-threads','2','-max_pixels','16777216'];
+@@ -42,0 +43,2 @@
++// Input filenames are generated locally, never derived from chat content.
++// image2 is needed for normal JPEGs (FFmpeg may choose it instead of jpeg_pipe).
+@@ -70 +72 @@
+-async function generateWebpAnimated(exe,input,out,{fps,seconds,layout,quality,start=0,detail=512,effort=1}) {
++async function generateWebpAnimated(exe,input,out,{fps,seconds,layout,quality,start=0,detail=512,effort=1},state) {
+@@ -72 +74,39 @@
+-  await run(exe,['-hide_banner','-loglevel','error','-y','-filter_threads','2',...inputArgs(input,start),'-t',String(seconds),'-an','-vf',vf,'-c:v','libwebp_anim','-lossless','0','-compression_level',String(effort),'-quality',String(quality),'-loop','0',out]);
++  let last;
++  for(const encoder of [...new Set([state.animatedEncoder,'libwebp_anim','libwebp'].filter(Boolean))]){
++    try{
++      await run(exe,['-hide_banner','-loglevel','error','-y','-filter_threads','2',...inputArgs(input,start),'-t',String(seconds),'-an','-vf',vf,'-c:v',encoder,'-lossless','0','-compression_level',String(effort),'-quality',String(quality),'-loop','0','-f','webp',out]);
++      const b=await readFile(out),info=analyzeWebP(b);
++      if(!info.animated||info.width!==512||info.height!==512)throw Error('O codificador não produziu um WebP animado de 512 × 512.');
++      state.animatedEncoder=encoder;return {b,info};
++    }catch(e){last=e;}
++  }
++  throw last||Error('Nenhum codificador WebP animado disponível.');
++}
++// Decode a still image once. The secondary encoder only receives a PNG
++// produced locally, not the original untrusted media file.
++async function generateStill(exe,input,out,command,maxBytes,dir){
++  const png=path.join(dir,'still.png');
++  await run(exe,['-hide_banner','-loglevel','error','-y','-filter_threads','2',...inputArgs(input,command.start||0),'-frames:v','1','-an','-vf',`format=rgba,${pixelFilter(command.layout)},format=rgba`,'-f','image2',png]);
++  let last,encoder='libwebp';
++  const cap=command.mode==='normal'?Math.min(maxBytes,100*1024):maxBytes;
++  const profiles=[[85,512],[65,512],[40,512],[20,512],[12,384],[8,256],[5,192]];
++  for(const [q,detail] of profiles){
++    for(const candidate of encoder==='magick'?['magick']:['libwebp','magick']){
++      try{
++        if(candidate==='libwebp'){
++          const vf=detail===512?'format=bgra':`scale=${detail}:${detail}:flags=bilinear,scale=512:512:flags=bilinear,format=bgra`;
++          await run(exe,['-hide_banner','-loglevel','error','-y','-filter_threads','2',...inputArgs(png),'-frames:v','1','-an','-vf',vf,'-c:v','libwebp','-lossless','0','-compression_level','1','-quality',String(q),'-f','webp',out]);
++        }else{
++          await run('magick',['-limit','memory','128MiB','-limit','map','256MiB','-limit','disk','512MiB','-limit','thread','2','png:'+png,...(detail===512?[]:['-resize',`${detail}x${detail}!`,'-resize','512x512!']),'-define','webp:lossless=false','-define','webp:method=1','-quality',String(q),'webp:'+out],{timeout:45000});
++        }
++        const b=await readFile(out),info=analyzeWebP(b);
++        if(info.animated||info.width!==512||info.height!==512)throw Error('O codificador não produziu WebP estático de 512 × 512.');
++        encoder=candidate;last=null;
++        if(b.length<=cap)return {b,encoder};
++        break;
++      }catch(e){last=e;}
++    }
++    // Don't repeat a failed encoder chain across every quality level.
++    if(last)throw last;
++  }
++  const e=Error('Imagem excede o tamanho permitido após otimização.');e.publicMessage='A foto não coube no limite do modo Normal. Tente !fig exp1 ou uma imagem menor.';throw e;
+@@ -90,0 +131,2 @@
++  if(kind==='image'&&bytes.toString('ascii',0,4)==='RIFF'&&bytes.toString('ascii',8,12)==='WEBP')kind='webp';
++  if(kind==='image'&&/^GIF8[79]a$/.test(bytes.toString('ascii',0,6)))kind='gif';
+@@ -131,8 +173,4 @@
+-        const qualities=[85,70,50,30,15];
+-        for(const q of qualities){
+-          await run(exe,['-hide_banner','-loglevel','error','-y',...inputArgs(input,command.start||0),'-frames:v','1','-an','-vf',`${pixelFilter(command.layout)},format=bgra`,'-c:v','libwebp','-quality',String(q),out]);
+-          const b=await readFile(out);if(b.length<=Math.min(maxBytes,100*1024) || (command.mode==='experimental'&&b.length<=maxBytes))return {buffer:b,format:'sticker',mime:'image/webp',...result,animated:false,bytes:b.length};
+-        }
+-        throw new Error('Imagem grande demais para figurinha. Reduza os detalhes ou use exp.');
+-      }
+-      const started=Date.now();let previous=null;
++        const {b,encoder}=await generateStill(exe,input,out,command,maxBytes,dir);
++        return {buffer:b,format:'sticker',mime:'image/webp',...result,animated:false,bytes:b.length,encoder};
++      }
++      const started=Date.now();let previous=null;const encoderState={};
+@@ -142,2 +180,2 @@
+-        await generateWebpAnimated(exe,input,out,{...profile,seconds:command.seconds,layout:command.layout,start:command.start||0});
+-        const b=await readFile(out);previous={...profile,bytes:b.length};
++        const {b,info}=await generateWebpAnimated(exe,input,out,{...profile,seconds:command.seconds,layout:command.layout,start:command.start||0},encoderState);
++        previous={...profile,bytes:b.length};
+@@ -145,3 +183 @@
+-          const info=analyzeWebP(b);
+-          if(!info.animated) throw new Error('O codificador gerou WebP estatico. Tente outro video ou mais segundos.');
+-          return {buffer:b,format:'sticker',mime:'image/webp',...result,fps:info.averageFps||profile.fps,animated:true,bytes:b.length,frames:info.frames,loweredFps:profile.fps<selectedFps,encodeAttempts:attempt+1,encodeMs:Date.now()-started,detail:profile.detail};
++          return {buffer:b,format:'sticker',mime:'image/webp',...result,fps:info.averageFps||profile.fps,animated:true,bytes:b.length,frames:info.frames,loweredFps:profile.fps<selectedFps,encodeAttempts:attempt+1,encodeMs:Date.now()-started,detail:profile.detail,encoder:encoderState.animatedEncoder};
+--- a/tests/bot.test.mjs
++++ b/tests/bot.test.mjs
+@@ -25,0 +26,2 @@
++
++test('erros de conversão ficam detalhados apenas no terminal; resposta do chat não revela detalhes',async t=>{const x=await setup(t);const logs=[];x.bot.log=s=>logs.push(s);x.bot.convert=async()=>{throw Error('FFmpeg: Format image2 not on whitelist https://example.invalid/secret');};await x.fire(msg('!fig',{fromMe:true,reply:true}));assert.ok(logs.some(s=>s.includes('[conversão]')&&s.includes('image2')));assert.ok(logs.every(s=>!s.includes('https://')));assert.match(x.sent[0][1].text,/Não consegui processar/);assert.doesNotMatch(x.sent[0][1].text,/image2|secret/);});
+--- a/tests/media.test.mjs
++++ b/tests/media.test.mjs
+@@ -70,0 +71,30 @@
++
++test('regressão JPEG: leitor image2 permitido, fotos JPEG e PNG viram WebP 512', {skip:!ff,timeout:120000},async()=>{
++  const dir=await mkdtemp(path.join(tmpdir(),'sl-static-test-'));
++  try{
++    for(const ext of ['jpg','png']){
++      const input=path.join(dir,'photo.'+ext);
++      const r=spawnSync(ff,['-hide_banner','-loglevel','error','-y','-f','lavfi','-i','testsrc=s=640x480','-frames:v','1',input],{encoding:'utf8',timeout:30000});
++      assert.equal(r.status,0,r.stderr);
++      const out=await convertMedia(await readFile(input),'image',{name:'fig',fps:30,seconds:3,start:0,mode:'normal',experimentalMB:1,layout:'stretch'});
++      const meta=analyzeWebP(out.buffer);assert.equal(meta.animated,false);assert.equal(meta.width,512);assert.equal(meta.height,512);assert.ok(out.buffer.length<=100*1024);
++    }
++  }finally{await rm(dir,{recursive:true,force:true});}
++});
++
++test('fallback animado usa libwebp quando libwebp_anim não está disponível', {skip:!ff||process.platform==='win32',timeout:120000},async()=>{
++  const {writeFile,chmod}=await import('node:fs/promises');
++  const dir=await mkdtemp(path.join(tmpdir(),'sl-fallback-test-'));
++  try{
++    const input=path.join(dir,'sample.mp4');
++    const r=spawnSync(ff,['-hide_banner','-loglevel','error','-y','-f','lavfi','-i','testsrc2=s=128x128:r=30:d=0.5','-c:v','libx264','-pix_fmt','yuv420p',input],{encoding:'utf8',timeout:30000});assert.equal(r.status,0,r.stderr);
++    const wrapper=path.join(dir,'ffmpeg-test');
++    // Wrapper simulates an unavailable encoder; all other invocations run real FFmpeg.
++    await writeFile(wrapper,'#!/bin/sh\nfor arg do\n  if [ "$arg" = libwebp_anim ]; then echo "Unknown encoder libwebp_anim" >&2; exit 1; fi\ndone\nexec "$SL_TEST_FFMPEG" "$@"\n');
++    await chmod(wrapper,0o700);
++    const module=new URL('../src/media.mjs',import.meta.url).href;
++    const script=`import {convertMedia} from ${JSON.stringify(module)};import {readFile} from 'node:fs/promises';const o=await convertMedia(await readFile(process.argv[1]),'video',{name:'fig',fps:30,seconds:.5,start:0,layout:'stretch',mode:'normal',experimentalMB:1});console.log(JSON.stringify({encoder:o.encoder,animated:o.animated,bytes:o.bytes}));`;
++    const x=spawnSync(process.execPath,['--input-type=module','-e',script,input],{encoding:'utf8',timeout:60000,env:{...process.env,SL_TEST_FFMPEG:ff,FFMPEG_PATH:wrapper}});
++    assert.equal(x.status,0,x.stderr);const data=JSON.parse(x.stdout);assert.equal(data.encoder,'libwebp');assert.equal(data.animated,true);assert.ok(data.bytes<=500*1024);
++  }finally{await rm(dir,{recursive:true,force:true});}
++});
